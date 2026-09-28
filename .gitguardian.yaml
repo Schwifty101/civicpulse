@@ -1,0 +1,10 @@
+# GitGuardian's generic-secret heuristics can't tell a base64-encoded placeholder from a
+# real credential by pattern alone. k8s/base/secret.yaml is required by the assignment spec
+# to contain placeholders only (never a real secret) — decode either value and you get
+# literally "changeme-postgres-password" / "changeme-groq-api-key". See the comment at the
+# top of that file and docs/RUNBOOK.md "Secrets" for how real values are actually supplied
+# (kubectl create secret / CI secret substitution — never committed).
+version: 2
+secret:
+  ignored-paths:
+    - "k8s/base/secret.yaml"
