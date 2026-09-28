@@ -133,7 +133,13 @@ jobs:
           kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.2/deploy/static/provider/kind/deploy.yaml
           kubectl wait --namespace ingress-nginx \
             --for=condition=ready pod --selector=app.kubernetes.io/component=controller \
-            --timeout=120s
+            --timeout=300s
+      - name: Diagnose ingress-nginx if it didn't come up
+        if: failure()
+        run: |
+          kubectl get pods -n ingress-nginx -o wide
+          kubectl describe pods -n ingress-nginx -l app.kubernetes.io/component=controller
+          kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller --tail=100 || true
 
       - name: Install metrics-server (needed for HPA)
         run: |
