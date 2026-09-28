@@ -1,0 +1,170 @@
+name: cd
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/${{ github.repository_owner }}/civicpulse
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: civicpulse
+          POSTGRES_PASSWORD: civicpulse
+          POSTGRES_DB: civicpulse
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U civicpulse" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL_OVERRIDE: postgresql+psycopg://civicpulse:civicpulse@localhost:5432/civicpulse
+      REDIS_HOST: localhost
+      TRIAGE_PROVIDER: simulated
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - working-directory: backend
+        run: |
+          pip install --no-cache-dir -e ".[dev]"
+          ruff check app scripts tests
+          mypy app
+          pytest --cov=app --cov-fail-under=65
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run type-check
+          npm run test
+
+  build-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      backend_digest: ${{ steps.backend_build.outputs.digest }}
+      frontend_digest: ${{ steps.frontend_build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push backend
+        id: backend_build
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/backend:${{ github.sha }}
+            ${{ env.IMAGE_BASE }}/backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build + push frontend
+        id: frontend_build
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/frontend:${{ github.sha }}
+            ${{ env.IMAGE_BASE }}/frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: SBOM — backend
+        uses: anchore/sbom-action@v0.17.2
+        with:
+          image: ${{ env.IMAGE_BASE }}/backend:${{ github.sha }}
+          artifact-name: sbom-backend.spdx.json
+      - name: SBOM — frontend
+        uses: anchore/sbom-action@v0.17.2
+        with:
+          image: ${{ env.IMAGE_BASE }}/frontend:${{ github.sha }}
+          artifact-name: sbom-frontend.spdx.json
+
+      - name: Print immutable references
+        run: |
+          echo "backend  digest: ${{ steps.backend_build.outputs.digest }}"
+          echo "frontend digest: ${{ steps.frontend_build.outputs.digest }}"
+
+  deploy-k8s:
+    needs: build-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: civicpulse-ci
+
+      - name: Install ingress-nginx
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.2/deploy/static/provider/kind/deploy.yaml
+          kubectl wait --namespace ingress-nginx \
+            --for=condition=ready pod --selector=app.kubernetes.io/component=controller \
+            --timeout=120s
+
+      - name: Install metrics-server (needed for HPA)
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+          kubectl patch deployment metrics-server -n kube-system --type=json \
+            -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+
+      - name: Pin the SHA-tagged images in overlays/prod
+        working-directory: k8s/overlays/prod
+        run: |
+          curl -sSLo /tmp/kustomize.tar.gz https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
+          tar -xzf /tmp/kustomize.tar.gz -C /tmp
+          /tmp/kustomize edit set image \
+            ghcr.io/schwifty101/civicpulse/backend=${{ env.IMAGE_BASE }}/backend:${{ github.sha }} \
+            ghcr.io/schwifty101/civicpulse/frontend=${{ env.IMAGE_BASE }}/frontend:${{ github.sha }}
+
+      - name: Apply
+        run: kubectl apply -k k8s/overlays/prod
+
+      - name: Wait for rollout
+        run: |
+          kubectl -n civicpulse rollout status deployment/backend --timeout=180s
+          kubectl -n civicpulse rollout status deployment/frontend --timeout=180s
+          kubectl -n civicpulse rollout status statefulset/postgres --timeout=180s
+
+      - name: Smoke test via Ingress
+        run: |
+          kubectl -n civicpulse port-forward svc/frontend 8080:80 &
+          sleep 3
+          curl -sf -H "Host: civicpulse.local" http://localhost:8080/api/health
+          curl -sf -H "Host: civicpulse.local" http://localhost:8080/ | grep -qi "<html"
+
+      - name: Print HPA status
+        run: kubectl -n civicpulse get hpa
