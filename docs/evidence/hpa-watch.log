@@ -1,0 +1,32 @@
+Captured 2026-09-28, local k3d cluster (`k3d cluster create civicpulse`), metrics-server
+installed with --kubelet-insecure-tls, load driven by a shortened variant of
+load/k6-script.js (20s ramp to 15 VUs, 90s ramp to 100 VUs, 60s hold, 20s ramp down)
+against the backend Service via `kubectl port-forward`. Command: `kubectl -n civicpulse get
+hpa -w`. See docs/ENGINEERING-NOTES.md Q5 for the lag analysis and
+docs/evidence/hpa-scaling-chart.png for the plotted version.
+
+NAME          REFERENCE            TARGETS        MINPODS   MAXPODS   REPLICAS   AGE
+backend-hpa   Deployment/backend   cpu: 18%/60%   2         10        2          5m15s
+backend-hpa   Deployment/backend   cpu: 44%/60%   2         10        2          5m17s
+backend-hpa   Deployment/backend   cpu: 23%/60%   2         10        2          5m32s
+backend-hpa   Deployment/backend   cpu: 133%/60%   2         10        2          5m47s
+backend-hpa   Deployment/backend   cpu: 256%/60%   2         10        5          6m2s
+backend-hpa   Deployment/backend   cpu: 260%/60%   2         10        9          6m17s
+backend-hpa   Deployment/backend   cpu: 141%/60%   2         10        9          6m32s
+backend-hpa   Deployment/backend   cpu: 85%/60%    2         10        9          6m47s
+backend-hpa   Deployment/backend   cpu: 69%/60%    2         10        9          7m2s
+backend-hpa   Deployment/backend   cpu: 80%/60%    2         10        10         7m17s
+backend-hpa   Deployment/backend   cpu: 23%/60%    2         10        10         7m33s
+backend-hpa   Deployment/backend   cpu: 21%/60%    2         10        10         7m48s
+backend-hpa   Deployment/backend   cpu: 26%/60%    2         10        10         8m3s
+backend-hpa   Deployment/backend   cpu: 36%/60%    2         10        10         8m18s
+backend-hpa   Deployment/backend   cpu: 26%/60%    2         10        10         8m33s
+backend-hpa   Deployment/backend   cpu: 41%/60%    2         10        10         9m3s
+backend-hpa   Deployment/backend   cpu: 29%/60%    2         10        10         9m18s
+
+Note the last seven rows: CPU utilization fell to 21-41% (well under the 60% target) by
+7m33s, but replicas held at 10 for the remainder of this capture (through 9m18s, i.e.
+~1m45s of sustained under-threshold utilization and counting) — the scaleDown
+stabilizationWindowSeconds: 300 in k8s/base/hpa.yaml deliberately keeping capacity up
+rather than flapping back down immediately. A longer capture would show the scale-down
+completing once the full 300s window elapses without a new high reading.
