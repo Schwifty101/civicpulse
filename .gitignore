@@ -1,0 +1,40 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# node
+node_modules/
+dist/
+frontend/coverage/
+.vite/
+
+# os
+.DS_Store
+
+# claude / superpowers scratch (keep plans, drop nothing else currently)
+.claude
+CLAUDE.md
+docs/superpowers
+
+# k8s / misc
+kubeconfig
+*.kubeconfig
+k3d-*.yaml
+
+# editors
+.vscode/
+.idea/
