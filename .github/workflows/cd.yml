@@ -157,6 +157,19 @@ jobs:
           kubectl patch deployment metrics-server -n kube-system --type=json \
             -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 
+      - name: Install VPA CRDs (needed for k8s/base/vpa.yaml)
+        # base/vpa.yaml (recommender-only, see docs/ENGINEERING-NOTES.md Q6) is a real part of
+        # the manifest set, not CI-only — it's "inert without VPA CRDs/controller installed
+        # in-cluster" per its own comment. A bare kind cluster has neither, so `kubectl apply -k`
+        # fails outright with "no matches for kind VerticalPodAutoscaler" (confirmed from the
+        # failed run's logs). Only the CRDs are required for apply to succeed — updateMode is
+        # "Off", so no recommender/updater/admission-controller pod needs to actually run here.
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/vpa-release-1.8/vertical-pod-autoscaler/deploy/vpa-v1-crd-gen.yaml
+          kubectl wait --for=condition=Established --timeout=60s \
+            crd/verticalpodautoscalers.autoscaling.k8s.io \
+            crd/verticalpodautoscalercheckpoints.autoscaling.k8s.io
+
       - name: Pin the SHA-tagged images in overlays/prod
         working-directory: k8s/overlays/prod
         run: |
