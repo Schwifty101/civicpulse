@@ -157,6 +157,13 @@ jobs:
           kubectl patch deployment metrics-server -n kube-system --type=json \
             -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 
+      - name: Install VPA CRDs/controller (needed for backend-vpa in overlays/prod)
+        run: |
+          git clone --depth 1 https://github.com/kubernetes/autoscaler.git /tmp/autoscaler
+          cd /tmp/autoscaler/vertical-pod-autoscaler
+          ./hack/vpa-up.sh
+          kubectl wait --for=condition=established --timeout=60s crd/verticalpodautoscalers.autoscaling.k8s.io
+
       - name: Pin the SHA-tagged images in overlays/prod
         working-directory: k8s/overlays/prod
         run: |
