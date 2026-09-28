@@ -189,3 +189,30 @@ table creation regardless. Fixed at
 `backend/alembic/versions/0001_initial_schema.py:35-43`. Both fixes are one apiece; finding
 them required treating "the error message" and "the actual root cause" as two different
 things, twice in a row.
+
+## Two named "why" notes required outside the eight questions above
+
+**Index justification (§2.3).** `backend/app/db/models.py:61,63` defines two indexes.
+`ix_complaints_status_priority` (`status`, `priority`) serves
+`complaints_repo.list_paginated` (`backend/app/repositories/complaints_repo.py:44-59`) —
+the dashboard's filtered list, `GET /api/complaints?status=open&priority=high`, is the
+single most common operator query (find the urgent open ones) and a composite index on
+the two equality-filter columns serves it directly, including when only one of the two
+is supplied. `ix_complaints_created_at` serves the same endpoint's `ORDER BY
+created_at DESC` (`complaints_repo.py:63`) — every call to that endpoint sorts by it,
+filtered or not, so an unfiltered "most recent complaints" dashboard load is what this
+index is for.
+
+**Why the cache gets a volume (§2.4).** A cache can always be *rebuilt* — that's not in
+question — but rebuilding isn't instant or free, and the moment it's empty is exactly
+the moment several pods restart at once (a Kubernetes rolling update, a `docker compose
+restart`). Without `redisdata` (`compose.yaml:14`, AOF via `--appendonly yes`
+`compose.yaml:43`), every one of those restarts would zero the stats cache and the
+triage content-hash cache simultaneously — the next request from every replica MISSes
+at once, all of them hit Postgres or the LLM provider at the same moment, right when the
+system is already mid-rollout. The volume doesn't make the cache "not a cache"; it turns
+"loses everything at the single worst-timed moment" into "loses nothing on a routine
+restart," which is what AOF buys here specifically — the rate limiter's own counters
+are short-TTL (60s windows, `ratelimit.py:26`) and don't need this at all; the volume is
+justified by the read-through and triage caches sharing the same Redis instance, not by
+the limiter.

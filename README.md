@@ -81,11 +81,30 @@ path, or see `docs/RUNBOOK.md` for the fully offline Ollama path.
 
 ## Screenshots
 
-| Submit → triaged result | Dashboard — server's 409 surfaced verbatim | Stats — X-Cache badge |
-|---|---|---|
-| ![Submit](docs/evidence/screenshots/submit-result.jpg) | ![Dashboard 409](docs/evidence/screenshots/dashboard-409-error.jpg) | ![Stats](docs/evidence/screenshots/stats-view.jpg) |
+| Submit — form | Submit → triaged result |
+|---|---|
+| ![Submit form](docs/evidence/screenshots/submit-view.jpg) | ![Submit result](docs/evidence/screenshots/submit-result.jpg) |
+
+| Dashboard — list view | Dashboard — server's 409 surfaced verbatim |
+|---|---|
+| ![Dashboard](docs/evidence/screenshots/dashboard-view.jpg) | ![Dashboard 409](docs/evidence/screenshots/dashboard-409-error.jpg) |
+
+| Stats — X-Cache badge |
+|---|
+| ![Stats](docs/evidence/screenshots/stats-view.jpg) |
 
 Kubernetes: `kubectl apply -k k8s/overlays/dev` — full steps in `docs/RUNBOOK.md`.
+
+### Further evidence
+
+All of the following live in `docs/evidence/`:
+
+| Evidence | What it shows |
+|---|---|
+| `branch-protection-rules-list.jpg`, `-required-checks.jpg`, `-detail-1.jpg` | `main` protected: PR required, ≥1 approval, required status checks |
+| `merge-conflict.md` + `merge-conflict-markers.txt` | The deliberate merge conflict (§A), real conflicting branches kept on the remote, resolution reasoning |
+| `network-segmentation.txt` | `frontend` provably cannot reach `database` — DNS resolution itself fails, not just a blocked connection |
+| `hpa-watch.log` + `hpa-scaling-chart.png` | `kubectl get hpa -w` under `k6` load, 2→10 replicas, referenced in `docs/ENGINEERING-NOTES.md` Q5 |
 
 ## API
 
