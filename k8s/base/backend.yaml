@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend  # name matters: frontend's nginx.conf proxy_passes to http://backend:8000
+  namespace: civicpulse
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: civicpulse
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # zero-downtime: never drop below full capacity during a rollout
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      terminationGracePeriodSeconds: 30
+      # Deployments have no depends_on: a pod can schedule before postgres/redis exist at
+      # all (their headless/ClusterIP DNS has nothing to resolve to yet), and entrypoint.sh's
+      # `alembic upgrade head` exits non-zero on that, so without this the pod CrashLoopBackOffs
+      # through k8s's exponential restart backoff until the database happens to be ready —
+      # minutes, not seconds. This polls instead of crash-looping.
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - until pg_isready -h postgres -U civicpulse -d civicpulse; do sleep 2; done
+      containers:
+        - name: backend
+          image: ghcr.io/schwifty101/civicpulse/backend:dev  # overlays pin the real SHA/digest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secret
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }  # HPA utilization = usage / request
+            limits: { cpu: "500m", memory: "256Mi" }
+          lifecycle:
+            preStop:
+              exec:
+                # Give the Service/Ingress time to remove this pod's endpoint before uvicorn
+                # stops accepting connections — otherwise a rolling update can route a request
+                # to a pod that's already mid-shutdown.
+                command: ["/bin/sh", "-c", "sleep 5"]
+          startupProbe:  # slow start is not failure — this is what stops restart loops on boot
+            httpGet: { path: /health, port: 8000 }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:  # restarts the pod — must NOT depend on the database
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:  # removes the pod from the Service — SHOULD depend on the database
+            httpGet: { path: /ready, port: 8000 }
+            periodSeconds: 5
+            timeoutSeconds: 3

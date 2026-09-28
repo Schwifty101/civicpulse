@@ -1,0 +1,17 @@
+# Production overlay. cd.yml runs `kustomize edit set image` here to pin the exact
+# commit-SHA-tagged images before `kubectl apply -k .` — see docs/adr/0003-deploy-by-sha.md.
+# These newTag values are placeholders that CI always overwrites; never deploy this
+# overlay unedited (":placeholder" is not a real, pullable tag).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: civicpulse
+
+resources:
+  - ../../base
+
+images:
+  - name: ghcr.io/schwifty101/civicpulse/backend
+    newTag: placeholder
+  - name: ghcr.io/schwifty101/civicpulse/frontend
+    newTag: placeholder

@@ -1,0 +1,17 @@
+# Recommender only — see docs/ENGINEERING-NOTES.md Q6 for why updateMode is "Off": HPA
+# scaling on CPU and VPA in Auto mode adjusting the CPU request act on the same signal and
+# fight each other (VPA raises the request -> utilization drops -> HPA scales in -> per-pod
+# load rises -> VPA raises the request again). Requires the VPA CRDs/controller installed
+# in-cluster (see docs/RUNBOOK.md) — this manifest is inert without them.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: backend-vpa
+  namespace: civicpulse
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  updatePolicy:
+    updateMode: "Off"

@@ -1,0 +1,23 @@
+# Local k3d/kind development — 1 replica each, images built and loaded straight into the
+# cluster (no registry round-trip needed). See docs/RUNBOOK.md "Deploy to Kubernetes".
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: civicpulse
+
+resources:
+  - ../../base
+
+replicas:
+  - name: backend
+    count: 1
+  - name: frontend
+    count: 1
+
+images:
+  - name: ghcr.io/schwifty101/civicpulse/backend
+    newName: civicpulse-backend
+    newTag: dev
+  - name: ghcr.io/schwifty101/civicpulse/frontend
+    newName: civicpulse-frontend
+    newTag: dev
