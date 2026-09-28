@@ -128,12 +128,22 @@ jobs:
         with:
           cluster_name: civicpulse-ci
 
+      - name: Label node for ingress-nginx's kind manifest
+        # The kind-provider ingress-nginx manifest schedules the controller only onto
+        # nodes labeled ingress-ready=true (see its nodeSelector) — kind itself only sets
+        # that label when the cluster is created from a kind Cluster config with
+        # `node-labels: ingress-ready=true`, which helm/kind-action doesn't do by default.
+        # Confirmed via `kubectl describe pod`: "0/1 nodes are available: 1 node(s)
+        # didn't match Pod's node affinity/selector" — a permanent scheduling failure, not
+        # a slow-pull timing issue (a longer `kubectl wait` timeout alone can't fix it).
+        run: kubectl label node --all ingress-ready=true --overwrite
+
       - name: Install ingress-nginx
         run: |
           kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.2/deploy/static/provider/kind/deploy.yaml
           kubectl wait --namespace ingress-nginx \
             --for=condition=ready pod --selector=app.kubernetes.io/component=controller \
-            --timeout=300s
+            --timeout=180s
       - name: Diagnose ingress-nginx if it didn't come up
         if: failure()
         run: |
