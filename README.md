@@ -125,10 +125,11 @@ docs/       ADRs, runbook, engineering notes, AI usage, evidence screenshots
 
 ## Status of this build
 
-Solo, AI-assisted session (see `docs/AI-USAGE.md`) — the collaboration-specific rubric
-items in §A (partner PR reviews, a two-person commit split, the merge-conflict resolution
-with a second contributor, the individual viva) are structurally out of scope for a
-single-contributor run and are not claimed here. Everything else in the spec — the running
+Solo, AI-assisted session (see `docs/AI-USAGE.md`). The parts of §A that genuinely require
+a second person — a partner's substantive PR review, a two-person commit split, an
+individual viva — are structurally out of scope for a single contributor and aren't
+claimed here. A deliberate merge conflict (§A) doesn't require a second person, so it's
+real: see `docs/evidence/merge-conflict.md`. Everything else in the spec — the running
 system, the four-layer backend, the AI triage layer, the Docker/Compose network
 segmentation, the Kubernetes manifests, and the CI/CD pipeline — is implemented and
 verified in this repository.
