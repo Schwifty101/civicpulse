@@ -12,7 +12,7 @@ data:
   REDIS_PORT: "6379"
   TRIAGE_PROVIDER: "rules"
   LOG_LEVEL: "INFO"
-  RATE_LIMIT_PER_MINUTE: "20"
+  RATE_LIMIT_PER_MINUTE: "15"
   CORS_ORIGINS: "http://civicpulse.local"
   GROQ_BASE_URL: "https://api.groq.com/openai/v1"
   GROQ_MODEL: "llama-3.1-8b-instant"

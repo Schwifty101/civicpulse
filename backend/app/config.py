@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # Backend behaviour
     triage_provider: str = "rules"  # rules | simulated | llm | ollama
     log_level: str = "INFO"
-    rate_limit_per_minute: int = 20
+    rate_limit_per_minute: int = 15
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
 
     # Groq (OpenAI-compatible)
