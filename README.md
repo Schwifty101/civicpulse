@@ -79,6 +79,12 @@ Ships with `TRIAGE_PROVIDER=rules` by default — zero API keys required to see 
 system working. Set `GROQ_API_KEY` in `.env` and `TRIAGE_PROVIDER=llm` for the hosted-LLM
 path, or see `docs/RUNBOOK.md` for the fully offline Ollama path.
 
+## Screenshots
+
+| Submit → triaged result | Dashboard — server's 409 surfaced verbatim | Stats — X-Cache badge |
+|---|---|---|
+| ![Submit](docs/evidence/screenshots/submit-result.jpg) | ![Dashboard 409](docs/evidence/screenshots/dashboard-409-error.jpg) | ![Stats](docs/evidence/screenshots/stats-view.jpg) |
+
 Kubernetes: `kubectl apply -k k8s/overlays/dev` — full steps in `docs/RUNBOOK.md`.
 
 ## API
