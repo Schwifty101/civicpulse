@@ -1,0 +1,20 @@
+Captured 2026-09-28 against the real compose.yaml network topology (a1_edge / a1_internal,
+the latter internal: true).
+
+=== attempting: frontend -> database (should FAIL, no route on internal:true network) ===
+$ docker exec seg-test-frontend sh -c "wget -T 3 -qO- http://database:5432/"
+wget: bad address 'database:5432'
+BLOCKED: connection failed as expected
+
+The frontend container cannot even resolve the `database` hostname — it isn't just
+firewalled, it has no network membership that would let Docker's embedded DNS answer for
+that name at all. This is what "frontend joins edge only" (compose.yaml) means in practice,
+not just in the network list.
+
+=== control: backend -> database (should SUCCEED, backend is on both networks) ===
+$ docker compose exec backend python -c "import socket; socket.create_connection(('database', 5432), timeout=3)"
+REACHABLE: backend can reach database (expected — backend bridges edge+internal)
+
+Confirms the isolation is topological (frontend's network membership), not a coincidental
+firewall rule that happens to block one specific container — the same connection attempt
+from backend, which is deliberately on both networks, succeeds immediately.

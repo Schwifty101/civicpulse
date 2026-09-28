@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: civicpulse
+data:
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "civicpulse"
+  POSTGRES_USER: "civicpulse"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  TRIAGE_PROVIDER: "rules"
+  LOG_LEVEL: "INFO"
+  RATE_LIMIT_PER_MINUTE: "20"
+  CORS_ORIGINS: "http://civicpulse.local"
+  GROQ_BASE_URL: "https://api.groq.com/openai/v1"
+  GROQ_MODEL: "llama-3.1-8b-instant"
+  OLLAMA_BASE_URL: "http://ollama:11434"
+  OLLAMA_MODEL: "llama3.2:1b"

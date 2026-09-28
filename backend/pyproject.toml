@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "CivicPulse municipal complaint intake, triage and operations API"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115,<0.116",
+    "fastapi>=0.140,<0.142",
+    "starlette>=1.0,<2",  # explicit floor — fastapi's own range alone won't pull past 0.46.2,
+                          # which carries CVE-2025-62727/CVE-2026-48818/CVE-2026-54283 (all HIGH)
     "uvicorn[standard]>=0.32,<0.33",
     "pydantic>=2.9,<3",
     "pydantic-settings>=2.5,<3",

@@ -1,0 +1,197 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  lint-and-type:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Backend lint + type check
+        working-directory: backend
+        run: |
+          pip install --no-cache-dir -e ".[dev]"
+          ruff check app scripts tests
+          mypy app
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend lint + type check
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run type-check
+
+  test-backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: civicpulse
+          POSTGRES_PASSWORD: civicpulse
+          POSTGRES_DB: civicpulse
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U civicpulse" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL_OVERRIDE: postgresql+psycopg://civicpulse:civicpulse@localhost:5432/civicpulse
+      REDIS_HOST: localhost
+      TRIAGE_PROVIDER: simulated
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install
+        working-directory: backend
+        run: pip install --no-cache-dir -e ".[dev]"
+      - name: Test with coverage
+        working-directory: backend
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=65
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: |
+          npm ci
+          npm run test
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          tags: civicpulse-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build frontend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: false
+          tags: civicpulse-frontend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  scan:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          load: true
+          tags: civicpulse-backend:ci
+          cache-from: type=gha
+      - uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: false
+          load: true
+          tags: civicpulse-frontend:ci
+          cache-from: type=gha
+      - name: Trivy scan — backend
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: civicpulse-backend:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Trivy scan — frontend
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: civicpulse-frontend:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: Validate prod overlay
+        run: |
+          kubectl kustomize k8s/overlays/prod | kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -kubernetes-version 1.29.0
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bring up the stack
+        run: docker compose -f compose.yaml up -d --build
+      - name: Wait for /ready
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/ready; then echo; break; fi
+            sleep 2
+          done
+          curl -sf http://localhost:8000/ready
+      - name: POST a complaint, GET it back, assert category
+        run: |
+          resp=$(curl -sf -X POST http://localhost:8000/api/complaints \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"Burst water main flooding Street 12 since fajr, water entering ground floors.","location":"Street 12, G-9"}')
+          echo "$resp"
+          id=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          category=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['category'])")
+          test "$category" = "water"
+          curl -sf "http://localhost:8000/api/complaints/$id" | grep -q "$id"
+      - name: Stats cache goes MISS then HIT
+        run: |
+          h1=$(curl -sf -D - -o /dev/null http://localhost:8000/api/stats | grep -i '^x-cache:')
+          h2=$(curl -sf -D - -o /dev/null http://localhost:8000/api/stats | grep -i '^x-cache:')
+          echo "first: $h1  second: $h2"
+          echo "$h1" | grep -qi MISS
+          echo "$h2" | grep -qi HIT
+      - name: Tear down (preserve nothing — this is CI)
+        if: always()
+        run: docker compose -f compose.yaml down -v

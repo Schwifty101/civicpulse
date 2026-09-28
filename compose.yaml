@@ -1,0 +1,144 @@
+# Dev stack: build: from source, hot-reload bind mount on the backend, no DB/cache ports
+# published (avoids colliding with a local Postgres/Redis on the same host — ask me how I
+# know). `docker compose up` is the one command that gets a stranger a running, seeded system.
+
+networks:
+  edge:       # frontend <-> backend. Has default internet access (needed for Groq/Ollama pulls).
+    driver: bridge
+  internal:   # backend <-> database <-> cache <-> ollama. No route to the outside world.
+    driver: bridge
+    internal: true
+
+volumes:
+  pgdata:         # Postgres data directory — the durable one.
+  redisdata:      # AOF persistence — see docs/adr and ENGINEERING-NOTES for why a cache has a volume.
+  ollama_models:  # model weights, so `--profile ollama up` doesn't re-pull ~800MB every time.
+
+services:
+  database:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks: [internal]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-civicpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-civicpulse}
+      POSTGRES_DB: ${POSTGRES_DB:-civicpulse}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-civicpulse} -d ${POSTGRES_DB:-civicpulse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+        reservations: { cpus: "0.25", memory: 128M }
+
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [internal]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+        reservations: { cpus: "0.1", memory: 64M }
+
+  # Optional, zero-key offline triage path. Not started by default — `docker compose up`
+  # never pulls an 800MB model. Start explicitly with: docker compose --profile ollama up
+  ollama:
+    image: ollama/ollama:0.3.12
+    restart: unless-stopped
+    profiles: ["ollama"]
+    # Needs outbound internet for the one-time model pull, so it bridges edge+internal —
+    # same trade-off backend makes for Groq. It is never published to the host and the
+    # frontend has no code path that ever calls it; only backend (TRIAGE_PROVIDER=ollama)
+    # talks to it, over the internal segment. See docs/ENGINEERING-NOTES.md Q7.
+    networks: [edge, internal]
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 4G }
+        reservations: { cpus: "0.5", memory: 1G }
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    networks: [edge, internal]  # only service that bridges the two — see docs/adr
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-civicpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-civicpulse}
+      POSTGRES_DB: ${POSTGRES_DB:-civicpulse}
+      REDIS_HOST: cache
+      REDIS_PORT: 6379
+      TRIAGE_PROVIDER: ${TRIAGE_PROVIDER:-rules}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-20}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
+    volumes:
+      # Dev-only hot-reload bind mount: edits to app/ take effect without a rebuild. Wrong
+      # in prod (compose.prod.yaml has no build: context, no source tree to mount, and a
+      # live-editable prod container is a liability, not a convenience) — see compose.prod.yaml.
+      - ./backend/app:/app/app:delegated
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    depends_on:
+      database:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+        reservations: { cpus: "0.25", memory: 256M }
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    networks: [edge]  # frontend joins edge ONLY — no route to database/cache, ever.
+    ports:
+      - "8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128M }
+        reservations: { cpus: "0.1", memory: 32M }
