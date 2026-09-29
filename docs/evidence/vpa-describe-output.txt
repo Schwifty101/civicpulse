@@ -1,0 +1,62 @@
+Captured on a local k3d cluster with the real upstream VPA controller installed
+(recommender + updater + admission-controller via kubernetes/autoscaler's hack/vpa-up.sh —
+not just the CRDs), so these are genuine recommender-computed numbers, not placeholders.
+
+=== Baseline, ~3 minutes after creation, idle traffic only ===
+$ kubectl -n civicpulse describe vpa backend-vpa
+  Recommendation:
+    Container Recommendations:
+      Container Name:  backend
+      Lower Bound:
+        Cpu:     25m
+        Memory:  250Mi
+      Target:
+        Cpu:     35m
+        Memory:  250Mi
+      Uncapped Target:
+        Cpu:     35m
+        Memory:  250Mi
+      Upper Bound:
+        Cpu:     8077m
+        Memory:  21609323240
+
+Guessed requests when the manifest was first written (k8s/base/backend.yaml):
+  requests: { cpu: "100m", memory: "128Mi" }
+Already close on CPU; memory was under-requested relative to what the container actually
+uses at rest (250Mi observed vs. 128Mi requested).
+
+=== Immediately after a k6 load run (100 VUs, ~2 min sustained) that scaled HPA 2->10 ===
+      Target:
+        Cpu:     224m
+        Memory:  250Mi
+
+=== Settled, some time after load stopped (recommender's decaying histogram catching down) ===
+$ kubectl -n civicpulse describe vpa backend-vpa
+  Recommendation:
+    Container Recommendations:
+      Container Name:  backend
+      Lower Bound:
+        Cpu:     33m
+        Memory:  250Mi
+      Target:
+        Cpu:     143m
+        Memory:  250Mi
+      Uncapped Target:
+        Cpu:     143m
+        Memory:  250Mi
+      Upper Bound:
+        Cpu:     7926m
+        Memory:  1828654331
+
+Reading: the committed request (100m) undershoots the settled Target (143m) once the
+backend has actually been exercised — VPA's advice here is "raise the CPU request to
+~143m", which is the concrete number a human would act on in the loop the spec describes
+(record guess -> load test -> describe vpa -> update request -> re-test). Memory stayed
+flat at 250Mi across every reading (well above the 128Mi guess), which is the more
+actionable of the two corrections.
+
+Note: this experiment's wall-clock host machine went to sleep partway through the longer
+load run, which is visible in the raw hpa-watch log as replica counts appearing "pinned"
+at 10 for several real-time hours far past the 300s scaleDown stabilization window before
+finally beginning to scale down again — see docs/ENGINEERING-NOTES.md for the honest
+account of that anomaly rather than a cleaned-up retelling.
