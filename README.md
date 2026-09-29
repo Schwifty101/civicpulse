@@ -105,6 +105,10 @@ All of the following live in `docs/evidence/`:
 | `merge-conflict.md` + `merge-conflict-markers.txt` | The deliberate merge conflict (§A), real conflicting branches kept on the remote, resolution reasoning |
 | `network-segmentation.txt` | `frontend` provably cannot reach `database` — DNS resolution itself fails, not just a blocked connection |
 | `hpa-watch.log` + `hpa-scaling-chart.png` | `kubectl get hpa -w` under `k6` load, 2→10 replicas, referenced in `docs/ENGINEERING-NOTES.md` Q5 |
+| `vpa-describe-output.txt` + `hpa-watch-vpa-session.log` | The full VPA loop done for real — guess → load test → `kubectl describe vpa` at three points → updated `k8s/base/backend.yaml` requests — see `docs/ENGINEERING-NOTES.md` Q6 |
+| `cache-hit-rate.md` + `cache-hit-rate-response.json` | Measured triage content-hash cache hit rate (57.14%, 4/7) against the real `LLMTriage` path — see `docs/TRIAGE.md` |
+| `image-sizes.md` | Final image sizes for both containers, and how to reproduce the `.dockerignore` context-size comparison |
+| `ghcr-backend-package.jpg` | GHCR package listing showing a SHA-tagged, published image (captured before the two most recent merges — the SHA tag itself is what matters, not which commit) |
 
 ## API
 
