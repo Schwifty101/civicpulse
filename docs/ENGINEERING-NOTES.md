@@ -132,8 +132,9 @@ the pod that would serve it doesn't exist yet.
 mutate a running pod's resources.
 
 The HPA (`k8s/base/hpa.yaml`) scales replica *count* on CPU utilization, computed as
-`usage ÷ request` (`k8s/base/backend.yaml`'s `resources.requests.cpu: 100m`, comment on that
-line). If VPA ran in `Auto` mode on the same Deployment, it would periodically rewrite that
+`usage ÷ request` (`k8s/base/backend.yaml`'s `resources.requests.cpu`, currently `150m` —
+see the VPA loop below for why it isn't still the original `100m` guess). If VPA ran in
+`Auto` mode on the same Deployment, it would periodically rewrite that
 same `requests.cpu` based on observed usage. The two controllers would then be reading and
 writing the same signal in a loop: VPA raises the CPU request because usage has been high →
 the SAME usage divided by a now-larger request computes as a LOWER utilization percentage →
@@ -143,6 +144,47 @@ Neither controller is malfunctioning; they're both correctly reacting to a signa
 one just changed. Recommender mode plus a human in the loop — read the recommendation,
 decide, commit a manifest change — is the documented industrial pattern specifically because
 it breaks that loop without needing either controller to know the other exists.
+
+**The loop the spec describes, done for real** (full raw output in
+`docs/evidence/vpa-describe-output.txt`), against a local k3d cluster with the actual
+upstream VPA controller installed (recommender + updater + admission-controller via
+`kubernetes/autoscaler`'s `hack/vpa-up.sh` — not just the CRDs; a CRD-only install, which is
+all `cd.yml` needs since CI never reads a recommendation, produces no recommender output at
+all, since the mode is `Off`):
+
+1. **Guessed requests** when the manifest was first written: `cpu: 100m, memory: 128Mi`.
+2. **Load test**: `load/k6-script.js` (shortened stages), 100 VUs, against the real backend
+   Service, the same run that produced the HPA scale-out in Q5.
+3. **`kubectl describe vpa backend-vpa`**, read at three points:
+   - Idle, ~3 min after creation: `Target: 35m cpu, 250Mi memory` (`Lower: 25m`, `Upper: 8077m`).
+   - Immediately after the load run: `Target: 224m cpu, 250Mi memory`.
+   - Settled, after load stopped and the recommender's histogram decayed back down:
+     `Target: 143m cpu, 250Mi memory` (`Lower: 33m`, `Upper: 7926m`).
+4. **Updated requests** (`k8s/base/backend.yaml`) to `cpu: 150m, memory: 256Mi` — the settled
+   Target rounded up slightly, not the load-spike peak, which is the whole point of the
+   recommender's decay window: don't provision for a five-minute burst as if it were normal.
+   Memory moved from 128Mi to 256Mi because every single reading — idle and loaded alike —
+   showed 250Mi in real use; the original guess was wrong at rest, not just under load.
+5. **What changes in HPA behaviour without re-running the whole load test**: HPA compares
+   the SAME CPU metric against a bigger denominator now. At the old `100m` request, 60%
+   utilization triggers at 60m of actual CPU use per pod; at the new `150m` request, the same
+   60% trigger now requires 90m of actual use. For an identical offered load, computed
+   utilization drops and the same traffic now needs measurably fewer replicas to stay under
+   the 60% target than it did against the undersized original guess — the guess was making
+   HPA scale out earlier (and further) than the workload's real footprint warranted.
+
+One honest anomaly, left in rather than quietly edited out: this machine went to sleep for
+several hours partway through the longer load-test session. The raw
+`docs/evidence/hpa-watch-vpa-session.log` shows replicas visibly "stuck" at 10 for multiple
+real-time hours — far past the 300s `scaleDown.stabilizationWindowSeconds` — before finally
+beginning to scale down again after the machine woke. The likely mechanism is the HPA
+controller's own reconciliation loop being suspended along with the host during sleep,
+which would desynchronize its internal stabilization-window clock from wall time on resume;
+this wasn't instrumented closely enough in the moment to confirm the exact mechanism from
+controller logs, so it's reported as an observation, not a proven root cause. It's a
+genuine example of a failure mode that has nothing to do with the manifest and everything to
+do with the host running the demo — worth knowing before attributing a "why won't it scale
+down" incident to the HPA configuration itself.
 
 ## 7. Where the `internal: true` network leaves the service that calls a hosted LLM
 

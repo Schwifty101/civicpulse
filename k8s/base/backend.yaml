@@ -55,8 +55,11 @@ spec:
             - secretRef:
                 name: backend-secret
           resources:
-            requests: { cpu: "100m", memory: "128Mi" }  # HPA utilization = usage / request
-            limits: { cpu: "500m", memory: "256Mi" }
+            # Updated from the original 100m/128Mi guess per backend-vpa's measured
+            # recommendation after a real load test — see docs/ENGINEERING-NOTES.md Q6
+            # and docs/evidence/vpa-describe-output.txt (Target: 143m cpu, 250Mi memory).
+            requests: { cpu: "150m", memory: "256Mi" }  # HPA utilization = usage / request
+            limits: { cpu: "500m", memory: "384Mi" }
           lifecycle:
             preStop:
               exec:

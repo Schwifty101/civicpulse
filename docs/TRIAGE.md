@@ -28,16 +28,24 @@
 {
   "active_provider": "llm",
   "recent_outcomes": [{"provider": "llm:groq", "latency_ms": 412, "fallback": false, "at": "..."}],
-  "triage_cache_hits": 7,
-  "triage_cache_lookups": 20,
-  "triage_cache_hit_rate": 0.35
+  "triage_cache_hits": 4,
+  "triage_cache_lookups": 7,
+  "triage_cache_hit_rate": 0.5714
 }
 ```
 
 `triage_cache_hits`/`triage_cache_lookups` are cumulative counters in Redis
-(`triage:cache:counters`), incremented on every triage call regardless of outcome. To see a
-non-trivial hit rate locally: seed a few duplicate complaints with `TRIAGE_PROVIDER=llm` or
-`ollama` set (the `rules` default never populates the cache, by design — see above), or run
+(`triage:cache:counters`), incremented on every triage call regardless of outcome.
+
+**Measured, not hypothetical**: the numbers above are a real run — 5× an identical
+complaint plus 2 distinct ones through `TRIAGE_PROVIDER=llm`, giving the expected 4 hits
+(the 2nd-5th identical submissions) against 7 total lookups. `recent_outcomes`' latencies
+confirm the mechanism: the one real miss took 127ms (an actual outbound call), every
+subsequent hit on the same content hash took 0ms (served from Redis, no outbound call at
+all). Full writeup and raw response: `docs/evidence/cache-hit-rate.md`.
+
+To reproduce: seed a few duplicate complaints with `TRIAGE_PROVIDER=llm` or `ollama` set
+(the `rules` default never populates the cache, by design — see above), or run
 `load/k6-script.js` against a `TRIAGE_PROVIDER=llm` deployment, which repeats a small pool
 of sample texts and will show hits climbing after the first pass.
 
